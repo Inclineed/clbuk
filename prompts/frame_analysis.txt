@@ -1,1 +1,7 @@
-Analyze this video frame from an online class. Describe what you see in one short, objective sentence (e.g. "Screen sharing slides on math, teacher is visible in the corner" or "Teacher speaking directly to camera, no screen share" or "Black screen").
+Analyze this video frame from an online class recording. Describe what you see in 1-2 short, objective sentences. Focus on:
+- What is displayed on screen (slide content, whiteboard writing, diagrams, code, etc.)
+- Whether the teacher is visible and their posture (presenting, writing, gesturing)
+- Any text or formulas visible on screen (summarize key content)
+
+Categorize the frame as one of: SLIDE, WHITEBOARD, SCREEN_SHARE, TALKING_HEAD, BLANK, OTHER.
+Format: [CATEGORY] Description of what is visible.

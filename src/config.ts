@@ -49,6 +49,9 @@ export const config = {
 
   // Frame Extraction
   frameExtractIntervalSec: parseInt(env('FRAME_EXTRACT_INTERVAL_SEC', '60'), 10),
+  smartFrameCandidateIntervalSec: parseInt(env('SMART_FRAME_CANDIDATE_INTERVAL_SEC', '10'), 10),
+  smartFrameChangeThreshold: parseInt(env('SMART_FRAME_CHANGE_THRESHOLD', '5'), 10),
+  smartFrameMaxVisionCalls: parseInt(env('SMART_FRAME_MAX_VISION_CALLS', '30'), 10),
 } as const;
 
 /** Extract Drive Folder ID from Drive folder URL */

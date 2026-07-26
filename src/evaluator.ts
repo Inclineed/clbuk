@@ -382,10 +382,17 @@ export async function evaluate(
     const formattedTranscript = formatTranscriptSegments(transcript);
     
     let userPrompt = '';
-    if (visualTimeline) {
-      userPrompt += `Here is the Visual Timeline of the video recording (1 frame analyzed per minute):\n${visualTimeline}\n\n`;
+    if (visualTimeline && visualTimeline.includes('[VISUAL')) {
+      // Multimodal timeline: interleaved visual + speech events
+      userPrompt += `Here is the time-synchronized classroom recording analysis (duration: ${Math.round(transcript.durationSeconds / 60)}m, speakers: ${transcript.speakers.join(', ')}):\n\n${visualTimeline}`;
+    } else if (visualTimeline) {
+      // Legacy format: separate visual timeline + transcript
+      userPrompt += `Here is the Visual Timeline of the video recording:\n${visualTimeline}\n\n`;
+      userPrompt += `Here is the verbal classroom transcript to audit (duration: ${Math.round(transcript.durationSeconds / 60)}m, speakers: ${transcript.speakers.join(', ')}):\n\n${formattedTranscript}`;
+    } else {
+      // Audio only: no visual data
+      userPrompt += `Here is the verbal classroom transcript to audit (duration: ${Math.round(transcript.durationSeconds / 60)}m, speakers: ${transcript.speakers.join(', ')}):\n\n${formattedTranscript}`;
     }
-    userPrompt += `Here is the verbal classroom transcript to audit (duration: ${Math.round(transcript.durationSeconds / 60)}m, speakers: ${transcript.speakers.join(', ')}):\n\n${formattedTranscript}`;
 
     if (config.evaluationProvider === 'anthropic') {
       // Step 1: Audit
