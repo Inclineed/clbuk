@@ -111,3 +111,116 @@ export async function analyzeVideoVisuals(
   log.success('report', 'Visual timeline generated.');
   return visualTimeline;
 }
+
+// ─── Structured Visual Event Classification ──────────────────
+
+import type { VisualEventType } from './visualEventDetector.js';
+
+export interface VisualEventClassification {
+  eventType: VisualEventType;
+  description: string;
+  visibleContent: string;
+}
+
+const VALID_EVENT_TYPES: Set<string> = new Set([
+  'SLIDE_CHANGED', 'WHITEBOARD_UPDATED', 'DIAGRAM_EXTENDED', 'CODE_MODIFIED',
+  'TEACHER_WRITING', 'TEACHER_STOPPED_WRITING', 'SCREEN_SHARE_STARTED',
+  'SCREEN_SHARE_ENDED', 'IDLE_VISUAL', 'OTHER',
+]);
+
+/**
+ * Classify a single frame into a structured visual event using the vision LLM.
+ * Returns a typed event object with eventType, description, and visibleContent.
+ *
+ * Falls back to raw text description if JSON parsing fails.
+ */
+export async function classifyVisualEvent(
+  framePath: string,
+  model: string,
+  previousFramePath?: string
+): Promise<VisualEventClassification> {
+  const endpoint = `${config.ollamaUrl}/api/chat`;
+
+  const imageBuffer = await fs.readFile(framePath);
+  const imageBase64 = imageBuffer.toString('base64');
+  
+  const images = [imageBase64];
+  if (previousFramePath) {
+    try {
+      const prevBuffer = await fs.readFile(previousFramePath);
+      // Insert previous frame FIRST so model sees it as image 1 (before) and current as image 2 (after)
+      images.unshift(prevBuffer.toString('base64'));
+    } catch {
+      log.warn('report', `Could not read previous frame for differential analysis: ${previousFramePath}`);
+    }
+  }
+
+  // Load the structured event prompt from file
+  let prompt = `Analyze this video frame from an online class recording and classify the visual event.`;
+
+  try {
+    const customPromptPath = path.join(root, 'prompts', 'frame_analysis.txt');
+    const content = await fs.readFile(customPromptPath, 'utf-8');
+    if (content.trim()) {
+      prompt = content.trim();
+    }
+  } catch {
+    // Fallback to default
+  }
+
+  const requestBody = {
+    model,
+    messages: [
+      {
+        role: 'user',
+        content: prompt,
+        images,
+      }
+    ],
+    format: 'json',
+    stream: false,
+    options: {
+      temperature: 0.1,
+    }
+  };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Ollama Vision error (${response.status}): ${errorText}`);
+  }
+
+  const data = (await response.json()) as any;
+  const rawContent = (data.message?.content || '').trim();
+
+  // Try to parse structured JSON
+  try {
+    const parsed = JSON.parse(rawContent);
+    const eventType = VALID_EVENT_TYPES.has(parsed.eventType) ? parsed.eventType : 'OTHER';
+    return {
+      eventType: eventType as VisualEventType,
+      description: parsed.description || rawContent,
+      visibleContent: parsed.visibleContent || '',
+    };
+  } catch {
+    // JSON parsing failed — extract what we can from raw text
+    let detectedType: VisualEventType = 'OTHER';
+    const upper = rawContent.toUpperCase();
+    if (upper.includes('SLIDE')) detectedType = 'SLIDE_CHANGED';
+    else if (upper.includes('WHITEBOARD') || upper.includes('WRITING')) detectedType = 'WHITEBOARD_UPDATED';
+    else if (upper.includes('CODE')) detectedType = 'CODE_MODIFIED';
+    else if (upper.includes('DIAGRAM')) detectedType = 'DIAGRAM_EXTENDED';
+    else if (upper.includes('SCREEN SHARE') || upper.includes('SCREENSHARE')) detectedType = 'SCREEN_SHARE_STARTED';
+
+    return {
+      eventType: detectedType,
+      description: rawContent || 'No visual data obtained.',
+      visibleContent: '',
+    };
+  }
+}

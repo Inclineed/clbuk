@@ -6,9 +6,9 @@ import { parseFileName } from './types.js';
 import type { RecordingInfo, PipelineResult } from './types.js';
 import { probeDuration, extractAudio } from './audioExtractor.js';
 import { extractFrames } from './frameExtractor.js';
-import { analyzeVideoVisuals } from './visionAnalyzer.js';
-import { extractSmartFrames } from './smartFrameExtractor.js';
-import { buildMultimodalTimeline, type AnalyzedFrame } from './timelineBuilder.js';
+import { analyzeVideoVisuals, classifyVisualEvent } from './visionAnalyzer.js';
+import { detectVisualChanges, type VisualEvent } from './visualEventDetector.js';
+import { buildMultimodalTimeline } from './timelineBuilder.js';
 import { transcribe } from './transcriber.js';
 import { evaluate } from './evaluator.js';
 import { generateReport } from './reportGenerator.js';
@@ -22,10 +22,9 @@ import { markProcessed } from './watcher.js';
  *   1. Probe duration
  *   2. Extract audio
  *   3. Transcribe audio
- *   4. Smart frame extraction + vision analysis (needs transcript for timeline)
+ *   4. Visual event detection (adaptive) + vision LLM classification
  *   5. Evaluate with LLM (receives interleaved multimodal timeline)
- *   6. Generate report
- *   7. Update tracking sheet
+ *   6. Generate report & update tracking sheet
  */
 export async function processVideo(file: {
   fileId: string;
@@ -63,79 +62,50 @@ export async function processVideo(file: {
     log.step('pipeline', 'Step 3/6 — Transcribing...');
     const { transcript, transcriptPath } = await transcribe(recordingId, audioPath, durationSeconds);
 
-    // ── Step 4/6: Smart visual analysis ──────────────────────
-    // Now that we have the transcript, we can build a time-synchronized
-    // multimodal timeline that interleaves visual events with speech.
+    // ── Step 4/6: Visual event detection ─────────────────────
     let multimodalTimeline: string | undefined;
-    let visualTimeline: string | undefined; // Legacy fallback for report
+    let visualTimeline: string | undefined;
 
     if (config.evaluationProvider !== 'mock') {
-      log.step('pipeline', 'Step 4/6 — Smart frame analysis...');
+      log.step('pipeline', 'Step 4/6 — Visual event detection...');
       const framesDir = path.join(config.workingDir, recordingId, 'frames');
 
       try {
-        // Phase 1: Extract and filter distinct frames
-        const smartFrames = await extractSmartFrames(file.filePath, framesDir);
+        // Streaming adaptive scan with interleaved LLM classification
+        const visualEvents = await detectVisualChanges(file.filePath, framesDir);
 
-        if (smartFrames.length > 0) {
-          // Phase 2: Describe each distinct frame with vision LLM
-          log.step('pipeline', `Analyzing ${smartFrames.length} distinct frames with vision LLM...`);
-          const analyzedFrames: AnalyzedFrame[] = [];
-
-          // Map SmartFrame[] to SampledFrame[] for the existing analyzeVideoVisuals
-          const sampledFrames = smartFrames.map(sf => ({
-            framePath: sf.framePath,
-            timestampSeconds: sf.timestampSeconds,
-          }));
-          const rawTimeline = await analyzeVideoVisuals(sampledFrames);
-
-          // Parse the raw timeline back into AnalyzedFrame objects
-          const timelineLines = rawTimeline.split('\n');
-          for (let i = 0; i < smartFrames.length && i < timelineLines.length; i++) {
-            const line = timelineLines[i];
-            // Extract the description after the timestamp prefix "[MM:SS] "
-            const descMatch = line.match(/^\[\d{2}:\d{2}\]\s*(.+)$/);
-            const description = descMatch ? descMatch[1] : line;
-
-            analyzedFrames.push({
-              timestampSeconds: smartFrames[i].timestampSeconds,
-              description,
-              changeScore: smartFrames[i].changeScore,
-            });
-          }
-
+        if (visualEvents.length > 0) {
           // Build time-synchronized multimodal timeline
-          multimodalTimeline = buildMultimodalTimeline(analyzedFrames, transcript);
-          visualTimeline = rawTimeline; // Keep for backward compat in report/eval
-
-          log.success('pipeline', `Built multimodal timeline with ${analyzedFrames.length} visual events.`);
+          multimodalTimeline = buildMultimodalTimeline(visualEvents, transcript);
+          log.success('pipeline', `Built multimodal timeline with ${visualEvents.length} visual events.`);
         } else {
-          log.warn('pipeline', 'Smart extraction produced 0 frames. Falling back to fixed-interval...');
-          throw new Error('No distinct frames found');
+          log.warn('pipeline', 'Visual detection produced 0 events. Falling back to fixed-interval...');
+          throw new Error('No visual events detected');
         }
       } catch (err: any) {
         // Fallback to legacy fixed-interval extraction
-        log.warn('pipeline', `Smart analysis failed (${err.message}), falling back to fixed-interval...`);
+        log.warn('pipeline', `Visual detection failed (${err.message}), falling back to fixed-interval...`);
         try {
-          const fallbackFramesDir = path.join(config.workingDir, recordingId, 'frames_fallback');
-          const frames = await extractFrames(file.filePath, fallbackFramesDir, config.frameExtractIntervalSec);
+          const fallbackDir = path.join(config.workingDir, recordingId, 'frames_fallback');
+          const frames = await extractFrames(file.filePath, fallbackDir, config.frameExtractIntervalSec);
           visualTimeline = await analyzeVideoVisuals(frames);
         } catch (fallbackErr: any) {
           log.warn('pipeline', `Fallback visual analysis also failed: ${fallbackErr.message}`);
         }
       }
     } else {
-      log.info('pipeline', 'Mock mode active: skipping frame extraction.');
+      log.info('pipeline', 'Mock mode active: skipping visual detection.');
       multimodalTimeline = `═══ 00:00 ═══
-[VISUAL] Screen share active: teacher presenting linear algebra slides. Teacher is visible in the corner webcam.
+[SLIDE_CHANGED] Title slide "Introduction to Linear Algebra" displayed
+  Content: "Introduction to Linear Algebra — Chapter 1"
 [SPEECH 00:00-01:00] Teacher: "Good morning class, today we are covering linear algebra."
 
 ═══ 01:00 ═══
-[VISUAL CHANGE] Screen share active: teacher writing on virtual whiteboard.
+[WHITEBOARD_UPDATED] Teacher writing matrix multiplication example on virtual whiteboard
 [SPEECH 01:00-03:00] Teacher: "Let me show you how matrix multiplication works."
 
 ═══ 03:00 ═══
-[VISUAL CHANGE] Teacher speaking directly to camera, no screen share.
+[IDLE_VISUAL] Teacher speaking directly to camera, no screen share active
 [SPEECH 03:00-05:00] Teacher: "Now let's practice with an exercise."`;
     }
 
@@ -164,4 +134,10 @@ export async function processVideo(file: {
     log.error('pipeline', err instanceof Error ? err.message : String(err));
     throw err;
   }
+}
+
+function formatTs(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }

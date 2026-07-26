@@ -47,11 +47,14 @@ export const config = {
   googleDriveFolderUrl: env('GOOGLE_DRIVE_FOLDER_URL', ''),
   googleSheetUrl: env('GOOGLE_SHEET_URL', ''),
 
-  // Frame Extraction
-  frameExtractIntervalSec: parseInt(env('FRAME_EXTRACT_INTERVAL_SEC', '60'), 10),
-  smartFrameCandidateIntervalSec: parseInt(env('SMART_FRAME_CANDIDATE_INTERVAL_SEC', '10'), 10),
-  smartFrameChangeThreshold: parseInt(env('SMART_FRAME_CHANGE_THRESHOLD', '5'), 10),
-  smartFrameMaxVisionCalls: parseInt(env('SMART_FRAME_MAX_VISION_CALLS', '30'), 10),
+  // Visual Event Detection
+  frameExtractIntervalSec: parseInt(env('FRAME_EXTRACT_INTERVAL_SEC', '60'), 10), // Legacy fallback
+  visualThumbIntervalSec: parseInt(env('VISUAL_THUMB_INTERVAL_SEC', '3'), 10),
+  visualChangeThreshold: parseInt(env('VISUAL_CHANGE_THRESHOLD', '5'), 10),
+  visualMaxEvents: parseInt(env('VISUAL_MAX_EVENTS', '30'), 10),
+  visualOcrEnabled: env('VISUAL_OCR_ENABLED', 'true') === 'true',
+  visualScanStep: parseInt(env('VISUAL_SCAN_STEP', '5'), 10),
+  visualTrackStability: parseInt(env('VISUAL_TRACK_STABILITY', '10'), 10),
 } as const;
 
 /** Extract Drive Folder ID from Drive folder URL */

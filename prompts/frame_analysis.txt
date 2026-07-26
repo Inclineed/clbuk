@@ -1,7 +1,12 @@
-Analyze this video frame from an online class recording. Describe what you see in 1-2 short, objective sentences. Focus on:
-- What is displayed on screen (slide content, whiteboard writing, diagrams, code, etc.)
-- Whether the teacher is visible and their posture (presenting, writing, gesturing)
-- Any text or formulas visible on screen (summarize key content)
+You are analyzing an educational video recording. You are given ONE OR TWO images.
+If two images are provided, the first is the previous context and the second is the current frame. Compare the SECOND image to the FIRST image and describe exactly WHAT CHANGED (e.g. "Teacher wrote a new equation", "Slide advanced", etc.).
+If only one image is provided, describe what is visible.
 
-Categorize the frame as one of: SLIDE, WHITEBOARD, SCREEN_SHARE, TALKING_HEAD, BLANK, OTHER.
-Format: [CATEGORY] Description of what is visible.
+Return a JSON object with exactly these fields:
+{
+  "eventType": one of: "SLIDE_CHANGED", "WHITEBOARD_UPDATED", "DIAGRAM_EXTENDED", "CODE_MODIFIED", "TEACHER_WRITING", "TEACHER_STOPPED_WRITING", "SCREEN_SHARE_STARTED", "SCREEN_SHARE_ENDED", "IDLE_VISUAL", "OTHER",
+  "description": "1-2 sentence objective description of WHAT CHANGED (or what is visible)",
+  "visibleContent": "Key new text, formulas, or code visible on screen (empty string if none)"
+}
+
+Focus on educational content: slide text, whiteboard writing, diagrams, code, formulas.
