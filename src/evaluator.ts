@@ -382,7 +382,7 @@ export async function evaluate(
     const formattedTranscript = formatTranscriptSegments(transcript);
     
     let userPrompt = '';
-    if (visualTimeline && visualTimeline.includes('[VISUAL')) {
+    if (visualTimeline && visualTimeline.includes('[SPEECH')) {
       // Multimodal timeline: interleaved visual + speech events
       userPrompt += `Here is the time-synchronized classroom recording analysis (duration: ${Math.round(transcript.durationSeconds / 60)}m, speakers: ${transcript.speakers.join(', ')}):\n\n${visualTimeline}`;
     } else if (visualTimeline) {

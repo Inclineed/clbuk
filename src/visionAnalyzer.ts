@@ -116,7 +116,10 @@ export async function analyzeVideoVisuals(
 
 import type { VisualEventType } from './visualEventDetector.js';
 
+export type VisualContentType = 'WHITEBOARD' | 'SLIDES' | 'CODE_EDITOR' | 'DOCUMENT' | 'BROWSER' | 'VIDEO_DEMO' | 'TALKING_HEAD' | 'MIXED' | 'OTHER';
+
 export interface VisualEventClassification {
+  contentType: VisualContentType;
   eventType: VisualEventType;
   description: string;
   visibleContent: string;
@@ -128,9 +131,14 @@ const VALID_EVENT_TYPES: Set<string> = new Set([
   'SCREEN_SHARE_ENDED', 'IDLE_VISUAL', 'OTHER',
 ]);
 
+const VALID_CONTENT_TYPES: Set<string> = new Set([
+  'WHITEBOARD', 'SLIDES', 'CODE_EDITOR', 'DOCUMENT', 'BROWSER', 
+  'VIDEO_DEMO', 'TALKING_HEAD', 'MIXED', 'OTHER'
+]);
+
 /**
  * Classify a single frame into a structured visual event using the vision LLM.
- * Returns a typed event object with eventType, description, and visibleContent.
+ * Returns a typed event object with contentType, eventType, description, and visibleContent.
  *
  * Falls back to raw text description if JSON parsing fails.
  */
@@ -202,7 +210,9 @@ export async function classifyVisualEvent(
   try {
     const parsed = JSON.parse(rawContent);
     const eventType = VALID_EVENT_TYPES.has(parsed.eventType) ? parsed.eventType : 'OTHER';
+    const contentType = VALID_CONTENT_TYPES.has(parsed.contentType) ? parsed.contentType : 'OTHER';
     return {
+      contentType: contentType as VisualContentType,
       eventType: eventType as VisualEventType,
       description: parsed.description || rawContent,
       visibleContent: parsed.visibleContent || '',
@@ -217,7 +227,13 @@ export async function classifyVisualEvent(
     else if (upper.includes('DIAGRAM')) detectedType = 'DIAGRAM_EXTENDED';
     else if (upper.includes('SCREEN SHARE') || upper.includes('SCREENSHARE')) detectedType = 'SCREEN_SHARE_STARTED';
 
+    let detectedContentType: VisualContentType = 'OTHER';
+    if (upper.includes('SLIDE')) detectedContentType = 'SLIDES';
+    else if (upper.includes('WHITEBOARD')) detectedContentType = 'WHITEBOARD';
+    else if (upper.includes('CODE')) detectedContentType = 'CODE_EDITOR';
+
     return {
+      contentType: detectedContentType,
       eventType: detectedType,
       description: rawContent || 'No visual data obtained.',
       visibleContent: '',

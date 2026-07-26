@@ -11,7 +11,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import { config } from './config.js';
 import { log } from './logger.js';
-import { classifyVisualEvent } from './visionAnalyzer.js';
+import { classifyVisualEvent, VisualContentType } from './visionAnalyzer.js';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -140,10 +140,36 @@ export async function detectVisualChanges(
   const fullDir = path.join(outputDir, 'full');
   await fs.mkdir(fullDir, { recursive: true });
 
+  interface ContentStrategy {
+    minDiff: number;
+    throttleSecs: number;
+    stabilityRequired: number;
+  }
+
+  function getContentStrategy(contentType: VisualContentType): ContentStrategy {
+    switch (contentType) {
+      case 'WHITEBOARD':
+        return { minDiff: 5, throttleSecs: 15, stabilityRequired: 10 };
+      case 'SLIDES':
+        return { minDiff: 10, throttleSecs: 5, stabilityRequired: 5 };
+      case 'CODE_EDITOR':
+        return { minDiff: 2, throttleSecs: 10, stabilityRequired: 5 };
+      case 'TALKING_HEAD':
+        return { minDiff: 20, throttleSecs: 30, stabilityRequired: 5 };
+      case 'DOCUMENT':
+      case 'BROWSER':
+      case 'VIDEO_DEMO':
+        return { minDiff: 5, throttleSecs: 10, stabilityRequired: 5 };
+      default:
+        return { minDiff: 5, throttleSecs: 15, stabilityRequired: 10 };
+    }
+  }
+
   const events: VisualEvent[] = [];
   
   // State machine variables
   let state: ScanState = 'SCANNING';
+  let currentContentType: VisualContentType = 'OTHER';
   let stableCount = 0;
   let prevBuffer: Buffer | null = null;
   let prevKeptFullPath: string | null = null;
@@ -237,6 +263,7 @@ export async function detectVisualChanges(
         
         // Initial classification
         const classification = await classifyVisualEvent(fullPath, config.ollamaVisionModel);
+        currentContentType = classification.contentType;
         
         events.push({
           timestampSeconds: 0,
@@ -262,15 +289,31 @@ export async function detectVisualChanges(
       let textChanged = false;
       let fullPath = path.join(fullDir, `frame_${String(thumbIndex).padStart(4, '0')}.jpg`);
 
-      if (diff >= threshold) {
-        isCandidate = true;
-        await extractSingleFrame(videoPath, timestampSec, fullPath);
-      } else if (diff >= borderlineLow && diff < threshold && ocrEnabled) {
+      const timeSinceLastEvent = events.length > 0 ? timestampSec - events[events.length - 1].timestampSeconds : timestampSec;
+      
+      const strategy = getContentStrategy(currentContentType);
+      const dynamicThreshold = strategy.minDiff;
+      const dynamicBorderline = dynamicThreshold * 0.4;
+
+      if (diff >= dynamicThreshold) {
+        if (state === 'TRACKING' && timeSinceLastEvent < strategy.throttleSecs) {
+          // Still highly active, but we throttle LLM calls based on content type
+          stableCount = 0;
+        } else {
+          isCandidate = true;
+          await extractSingleFrame(videoPath, timestampSec, fullPath);
+        }
+      } else if (diff >= dynamicBorderline && diff < dynamicThreshold && ocrEnabled) {
         await extractSingleFrame(videoPath, timestampSec, fullPath);
         textChanged = await hasTextChanged(prevKeptFullPath, fullPath);
         if (textChanged) {
-          isCandidate = true;
-          log.info('visual-detect', `OCR caught text change at ${formatTs(timestampSec)} (pixel diff: ${diff.toFixed(1)}%)`);
+          if (state === 'TRACKING' && timeSinceLastEvent < strategy.throttleSecs) {
+            stableCount = 0;
+            try { await fs.unlink(fullPath); } catch {}
+          } else {
+            isCandidate = true;
+            log.info('visual-detect', `OCR caught text change at ${formatTs(timestampSec)} (pixel diff: ${diff.toFixed(1)}%)`);
+          }
         } else {
           try { await fs.unlink(fullPath); } catch {}
           stableCount++;
@@ -280,7 +323,7 @@ export async function detectVisualChanges(
       }
 
       // Transition state if stable
-      if (state === 'TRACKING' && stableCount >= trackStability) {
+      if (state === 'TRACKING' && stableCount >= strategy.stabilityRequired) {
         state = 'SCANNING';
         log.info('visual-detect', `→ SCANNING mode at ${formatTs(timestampSec)} (stable for ${stableCount * intervalSec}s)`);
         stableCount = 0;
@@ -291,6 +334,7 @@ export async function detectVisualChanges(
         
         // Differential Vision Analysis
         const classification = await classifyVisualEvent(fullPath, config.ollamaVisionModel, prevKeptFullPath);
+        currentContentType = classification.contentType;
         
         const changeScore = Math.round(diff * 10) / 10;
         events.push({

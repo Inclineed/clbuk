@@ -4,9 +4,11 @@ If only one image is provided, describe what is visible.
 
 Return a JSON object with exactly these fields:
 {
+  "contentType": one of: "WHITEBOARD", "SLIDES", "CODE_EDITOR", "DOCUMENT", "BROWSER", "VIDEO_DEMO", "TALKING_HEAD", "MIXED", "OTHER",
   "eventType": one of: "SLIDE_CHANGED", "WHITEBOARD_UPDATED", "DIAGRAM_EXTENDED", "CODE_MODIFIED", "TEACHER_WRITING", "TEACHER_STOPPED_WRITING", "SCREEN_SHARE_STARTED", "SCREEN_SHARE_ENDED", "IDLE_VISUAL", "OTHER",
   "description": "1-2 sentence objective description of WHAT CHANGED (or what is visible)",
   "visibleContent": "Key new text, formulas, or code visible on screen (empty string if none)"
 }
 
+Identify the "contentType" based on the primary educational medium shown on screen.
 Focus on educational content: slide text, whiteboard writing, diagrams, code, formulas.
