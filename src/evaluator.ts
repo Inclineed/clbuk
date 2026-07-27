@@ -9,6 +9,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import http from 'http';
+import https from 'https';
 import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import { log } from './logger.js';
@@ -255,12 +256,13 @@ async function callClaude(systemPrompt: string, userPrompt: string): Promise<any
   return JSON.parse(jsonStr.trim());
 }
 
-// ─── Ollama API Helpers ──────────────────────────────────────
+// ─── Network Request Helpers ─────────────────────────────────
 
-function httpPost(urlStr: string, body: any): Promise<string> {
+function requestPost(urlStr: string, headers: Record<string, string>, body: any): Promise<string> {
   return new Promise((resolve, reject) => {
     const url = new URL(urlStr);
     const postData = JSON.stringify(body);
+    const transport = url.protocol === 'https:' ? https : http;
     
     const options = {
       hostname: url.hostname,
@@ -268,12 +270,13 @@ function httpPost(urlStr: string, body: any): Promise<string> {
       path: url.pathname + url.search,
       method: 'POST',
       headers: {
+        ...headers,
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(postData),
       },
     };
 
-    const req = http.request(options, (res) => {
+    const req = transport.request(options, (res) => {
       let data = '';
       res.setEncoding('utf8');
       res.on('data', (chunk) => {
@@ -283,7 +286,7 @@ function httpPost(urlStr: string, body: any): Promise<string> {
         if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
           resolve(data);
         } else {
-          reject(new Error(`HTTP Error (${res.statusCode}): ${data}`));
+          reject(new Error(`HTTP/S Error (${res.statusCode}): ${data}`));
         }
       });
     });
@@ -296,6 +299,8 @@ function httpPost(urlStr: string, body: any): Promise<string> {
     req.end();
   });
 }
+
+// ─── Ollama API Helpers ──────────────────────────────────────
 
 async function callOllama(systemPrompt: string, userPrompt: string): Promise<any> {
   const endpoint = `${config.ollamaUrl}/api/chat`;
@@ -314,7 +319,7 @@ async function callOllama(systemPrompt: string, userPrompt: string): Promise<any
     }
   };
 
-  const responseText = await httpPost(endpoint, requestBody);
+  const responseText = await requestPost(endpoint, {}, requestBody);
   const data = JSON.parse(responseText);
   const jsonContent = data.message?.content;
 
@@ -323,6 +328,66 @@ async function callOllama(systemPrompt: string, userPrompt: string): Promise<any
   }
 
   return JSON.parse(jsonContent.trim());
+}
+
+// ─── OpenAI API Helpers ──────────────────────────────────────
+
+async function callOpenAI(systemPrompt: string, userPrompt: string): Promise<any> {
+  const url = 'https://api.openai.com/v1/chat/completions';
+  const headers = {
+    'Authorization': `Bearer ${config.openaiApiKey}`,
+  };
+  const body = {
+    model: config.openaiModel,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ],
+    response_format: { type: 'json_object' },
+    temperature: 0.1,
+  };
+
+  const responseText = await requestPost(url, headers, body);
+  const data = JSON.parse(responseText);
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error(`OpenAI returned empty response. Response: ${responseText}`);
+  }
+  return JSON.parse(content.trim());
+}
+
+// ─── Gemini API Helpers ──────────────────────────────────────
+
+async function callGemini(systemPrompt: string, userPrompt: string): Promise<any> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent?key=${config.geminiApiKey}`;
+  const headers = {};
+  const body = {
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: userPrompt }
+        ]
+      }
+    ],
+    systemInstruction: {
+      parts: [
+        { text: systemPrompt }
+      ]
+    },
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.1,
+    }
+  };
+
+  const responseText = await requestPost(url, headers, body);
+  const data = JSON.parse(responseText);
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!content) {
+    throw new Error(`Gemini returned empty response. Response: ${responseText}`);
+  }
+  return JSON.parse(content.trim());
 }
 
 // ─── Public API ──────────────────────────────────────────────
@@ -408,6 +473,34 @@ export async function evaluate(
         ...auditResult,
         ...gradingResult
       };
+    } else if (config.evaluationProvider === 'openai') {
+      // Step 1: Audit
+      log.info('evaluate', 'Step 1/2: Running Audit Stage with OpenAI...');
+      const auditResult = await callOpenAI(await buildAuditSystemPrompt(), userPrompt);
+      
+      // Step 2: Grading
+      log.info('evaluate', 'Step 2/2: Running Grading Stage with OpenAI...');
+      const gradingPrompt = await buildGradingSystemPrompt(JSON.stringify(auditResult, null, 2));
+      const gradingResult = await callOpenAI(gradingPrompt, userPrompt);
+
+      finalResult = {
+        ...auditResult,
+        ...gradingResult
+      };
+    } else if (config.evaluationProvider === 'gemini') {
+      // Step 1: Audit
+      log.info('evaluate', 'Step 1/2: Running Audit Stage with Gemini...');
+      const auditResult = await callGemini(await buildAuditSystemPrompt(), userPrompt);
+      
+      // Step 2: Grading
+      log.info('evaluate', 'Step 2/2: Running Grading Stage with Gemini...');
+      const gradingPrompt = await buildGradingSystemPrompt(JSON.stringify(auditResult, null, 2));
+      const gradingResult = await callGemini(gradingPrompt, userPrompt);
+
+      finalResult = {
+        ...auditResult,
+        ...gradingResult
+      };
     } else if (config.evaluationProvider === 'local') {
       // Step 1: Audit
       log.info('evaluate', 'Step 1/2: Running Audit Stage with local Ollama...');
@@ -441,7 +534,15 @@ export async function evaluate(
       ...finalResult,
       recordingId,
       visualTimeline,
-      model: config.evaluationProvider === 'local' ? `ollama-${config.ollamaModel}` : config.evaluationProvider === 'anthropic' ? config.anthropicModel : 'mock',
+      model: config.evaluationProvider === 'local' 
+        ? `ollama-${config.ollamaModel}` 
+        : config.evaluationProvider === 'anthropic' 
+          ? config.anthropicModel 
+          : config.evaluationProvider === 'openai'
+            ? config.openaiModel
+            : config.evaluationProvider === 'gemini'
+              ? config.geminiModel
+              : 'mock',
       createdAt: new Date().toISOString(),
     };
 

@@ -16,19 +16,26 @@ function env(key: string, fallback: string): string {
 }
 
 // Detect if API keys are provided to override local/default configurations
-const hasAssemblyKey = !!(process.env.ASSEMBLYAI_API_KEY && process.env.ASSEMBLYAI_API_KEY.trim());
 const hasAnthropicKey = !!(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim());
+const hasOpenAIKey = !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim());
+const hasGeminiKey = !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim());
 
-const rawTranscriptionProvider = env('TRANSCRIPTION_PROVIDER', 'local');
-const rawEvaluationProvider = env('EVALUATION_PROVIDER', 'local');
+const rawEvaluationProvider = process.env.EVALUATION_PROVIDER || '';
 
-const transcriptionProvider = (hasAssemblyKey && rawTranscriptionProvider !== 'mock')
-  ? 'assemblyai'
-  : (rawTranscriptionProvider as 'local' | 'assemblyai' | 'mock');
-
-const evaluationProvider = (hasAnthropicKey && rawEvaluationProvider !== 'mock')
-  ? 'anthropic'
-  : (rawEvaluationProvider as 'local' | 'anthropic' | 'mock');
+let evaluationProvider: 'local' | 'anthropic' | 'openai' | 'gemini' | 'mock' = 'local';
+if (rawEvaluationProvider === 'mock') {
+  evaluationProvider = 'mock';
+} else if (rawEvaluationProvider === 'anthropic' || rawEvaluationProvider === 'openai' || rawEvaluationProvider === 'gemini') {
+  evaluationProvider = rawEvaluationProvider;
+} else if (hasAnthropicKey) {
+  evaluationProvider = 'anthropic';
+} else if (hasOpenAIKey) {
+  evaluationProvider = 'openai';
+} else if (hasGeminiKey) {
+  evaluationProvider = 'gemini';
+} else {
+  evaluationProvider = 'local';
+}
 
 export const config = {
   // Paths
@@ -42,34 +49,25 @@ export const config = {
   // Polling interval in ms (default 30 seconds for dev)
   pollIntervalMs: parseInt(env('POLL_INTERVAL_MS', '30000'), 10),
 
-  // Transcription
-  transcriptionProvider,
-  assemblyaiApiKey: process.env.ASSEMBLYAI_API_KEY || '',
-  whisperModelSize: env('WHISPER_MODEL_SIZE', 'base'), // tiny, base, small
-
   // Evaluation
   evaluationProvider,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   anthropicModel: env('ANTHROPIC_MODEL', 'claude-sonnet-4-20250514'),
+  
+  openaiApiKey: process.env.OPENAI_API_KEY || '',
+  openaiModel: env('OPENAI_MODEL', 'gpt-4o'),
+
+  geminiApiKey: process.env.GEMINI_API_KEY || '',
+  geminiModel: env('GEMINI_MODEL', 'gemini-1.5-flash'),
 
   // Ollama (Local LLM)
   ollamaUrl: env('OLLAMA_URL', 'http://127.0.0.1:11434'),
   ollamaModel: env('OLLAMA_MODEL', 'llama3.1'),
-  ollamaVisionModel: env('OLLAMA_VISION_MODEL', 'llava'),
 
   // Google API Settings
   googleCredentialsPath: path.resolve(root, env('GOOGLE_APPLICATION_CREDENTIALS', './google-credentials.json')),
   googleDriveFolderUrl: env('GOOGLE_DRIVE_FOLDER_URL', ''),
   googleSheetUrl: env('GOOGLE_SHEET_URL', ''),
-
-  // Visual Event Detection
-  frameExtractIntervalSec: parseInt(env('FRAME_EXTRACT_INTERVAL_SEC', '60'), 10), // Legacy fallback
-  visualThumbIntervalSec: parseInt(env('VISUAL_THUMB_INTERVAL_SEC', '3'), 10),
-  visualChangeThreshold: parseInt(env('VISUAL_CHANGE_THRESHOLD', '5'), 10),
-  visualMaxEvents: parseInt(env('VISUAL_MAX_EVENTS', '30'), 10),
-  visualOcrEnabled: env('VISUAL_OCR_ENABLED', 'true') === 'true',
-  visualScanStep: parseInt(env('VISUAL_SCAN_STEP', '5'), 10),
-  visualTrackStability: parseInt(env('VISUAL_TRACK_STABILITY', '10'), 10),
 } as const;
 
 /** Extract Drive Folder ID from Drive folder URL */

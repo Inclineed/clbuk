@@ -68,7 +68,6 @@ async function main() {
   log.info('main', '║   Classsbuk AI Class Recording Reviewer  ║');
   log.info('main', '╚══════════════════════════════════════════╝');
   log.info('main', `Watch folder:  ${config.watchFolder}`);
-  log.info('main', `Transcription: ${config.transcriptionProvider}`);
   log.info('main', `Evaluation:    ${config.evaluationProvider}`);
   log.info('main', `Mode:          ${ONE_SHOT ? 'one-shot' : 'watch'}`);
   log.info('main', '');
@@ -76,12 +75,12 @@ async function main() {
   if (ONE_SHOT) {
     // Process everything currently in the folder and exit
     const count = await processAllNew();
-    log.info('main', `Done. Processed ${count} video(s).`);
+    log.info('main', `Done. Processed ${count} transcript(s).`);
     process.exit(0);
   }
 
   // Watch mode — poll on an interval
-  log.info('main', `Polling every ${config.pollIntervalMs / 1000}s. Drop videos into: ${config.watchFolder}`);
+  log.info('main', `Polling every ${config.pollIntervalMs / 1000}s. Drop transcripts into: ${config.watchFolder}`);
   log.info('main', 'Press Ctrl+C to stop.\n');
 
   let running = true;
