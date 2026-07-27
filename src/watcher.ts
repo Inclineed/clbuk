@@ -8,7 +8,7 @@ import path from 'path';
 import { config } from './config.js';
 import { log } from './logger.js';
 
-const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mkv', '.avi', '.mov']);
+const TRANSCRIPT_EXTENSIONS = new Set(['.json', '.txt']);
 
 /** Load the set of already-processed file IDs. */
 async function loadProcessed(): Promise<Set<string>> {
@@ -35,7 +35,7 @@ export async function isProcessed(fileId: string): Promise<boolean> {
 }
 
 /**
- * Scan the watch folder and return any new (unprocessed) video files.
+ * Scan the watch folder and return any new (unprocessed) transcript files.
  * Each file's name is used as its unique ID.
  */
 export async function findNewVideos(): Promise<{ fileId: string; fileName: string; filePath: string }[]> {
@@ -49,7 +49,7 @@ export async function findNewVideos(): Promise<{ fileId: string; fileName: strin
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const ext = path.extname(entry.name).toLowerCase();
-    if (!VIDEO_EXTENSIONS.has(ext)) continue;
+    if (!TRANSCRIPT_EXTENSIONS.has(ext)) continue;
     if (processed.has(entry.name)) continue;
 
     newFiles.push({
@@ -60,7 +60,7 @@ export async function findNewVideos(): Promise<{ fileId: string; fileName: strin
   }
 
   if (newFiles.length > 0) {
-    log.info('watcher', `Found ${newFiles.length} new video(s)`);
+    log.info('watcher', `Found ${newFiles.length} new transcript(s)`);
   }
 
   return newFiles;

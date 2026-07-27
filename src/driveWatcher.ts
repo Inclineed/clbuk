@@ -7,13 +7,14 @@ import { log } from './logger.js';
 import { isProcessed } from './watcher.js';
 
 // Supported video mime types
-const VIDEO_MIME_TYPES = new Set([
-  'video/mp4',
-  'video/webm',
-  'video/x-matroska',
-  'video/avi',
-  'video/quicktime',
+// Supported transcript mime types
+const TRANSCRIPT_MIME_TYPES = new Set([
+  'text/plain',
+  'application/json',
+  'application/vnd.google-apps.document', // Google Docs
 ]);
+
+const TRANSCRIPT_EXTENSIONS = ['.json', '.txt'];
 
 /** Verify Google credentials file exists */
 export async function hasGoogleCredentials(): Promise<boolean> {
@@ -36,7 +37,7 @@ function getGoogleAuth() {
   });
 }
 
-export interface DriveVideoFile {
+export interface DriveTranscriptFile {
   fileId: string;
   fileName: string;
   mimeType: string;
@@ -44,9 +45,9 @@ export interface DriveVideoFile {
 }
 
 /**
- * Scan the Google Drive folder for unprocessed videos.
+ * Scan the Google Drive folder for unprocessed transcripts.
  */
-export async function findNewDriveVideos(): Promise<DriveVideoFile[]> {
+export async function findNewDriveTranscripts(): Promise<DriveTranscriptFile[]> {
   if (!(await hasGoogleCredentials())) {
     log.warn('watcher', `Google Service Account credentials file not found at: ${config.googleCredentialsPath}`);
     log.warn('watcher', 'Please place google-credentials.json in your project root or configure GOOGLE_APPLICATION_CREDENTIALS in .env.');
@@ -63,7 +64,7 @@ export async function findNewDriveVideos(): Promise<DriveVideoFile[]> {
   const drive = google.drive({ version: 'v3', auth });
 
   try {
-    log.step('watcher', `Scanning Google Drive folder: ${folderId} ...`);
+    log.step('watcher', `Scanning Google Drive folder for transcripts: ${folderId} ...`);
     const response = await drive.files.list({
       q: `'${folderId}' in parents and trashed = false`,
       fields: 'files(id, name, mimeType, size)',
@@ -71,35 +72,34 @@ export async function findNewDriveVideos(): Promise<DriveVideoFile[]> {
     });
 
     const files = response.data.files || [];
-    const newVideos: DriveVideoFile[] = [];
+    const newTranscripts: DriveTranscriptFile[] = [];
 
     for (const file of files) {
       if (!file.id || !file.name) continue;
 
-      // Filter by mimeType or extension
-      const isVideoMime = file.mimeType ? VIDEO_MIME_TYPES.has(file.mimeType) : false;
+      const isTranscriptMime = file.mimeType ? TRANSCRIPT_MIME_TYPES.has(file.mimeType) : false;
       const ext = path.extname(file.name).toLowerCase();
-      const isVideoExt = ['.mp4', '.webm', '.mkv', '.avi', '.mov'].includes(ext);
+      const isTranscriptExt = TRANSCRIPT_EXTENSIONS.includes(ext);
 
-      if (!isVideoMime && !isVideoExt) continue;
+      if (!isTranscriptMime && !isTranscriptExt) continue;
 
       // Use file.id for unique state tracking rather than name
       const alreadyProcessed = await isProcessed(file.id);
       if (alreadyProcessed) continue;
 
-      newVideos.push({
+      newTranscripts.push({
         fileId: file.id,
         fileName: file.name,
-        mimeType: file.mimeType || 'video/mp4',
+        mimeType: file.mimeType || 'text/plain',
         sizeBytes: file.size ? parseInt(file.size, 10) : undefined,
       });
     }
 
-    if (newVideos.length > 0) {
-      log.success('watcher', `Found ${newVideos.length} new video(s) in Google Drive folder.`);
+    if (newTranscripts.length > 0) {
+      log.success('watcher', `Found ${newTranscripts.length} new transcript(s) in Google Drive folder.`);
     }
 
-    return newVideos;
+    return newTranscripts;
   } catch (err: any) {
     log.error('watcher', `Google Drive folder scan failed: ${err.message}`);
     return [];
@@ -107,9 +107,9 @@ export async function findNewDriveVideos(): Promise<DriveVideoFile[]> {
 }
 
 /**
- * Download a Google Drive file to the local watch folder for processing.
+ * Download a Google Drive transcript file (or export Google Doc to plain text) to the local watch folder for processing.
  */
-export async function downloadDriveVideo(fileId: string, destPath: string): Promise<void> {
+export async function downloadDriveTranscript(fileId: string, destPath: string, mimeType?: string): Promise<void> {
   const auth = getGoogleAuth();
   const drive = google.drive({ version: 'v3', auth });
 
@@ -117,15 +117,27 @@ export async function downloadDriveVideo(fileId: string, destPath: string): Prom
 
   await fsPromises.mkdir(path.dirname(destPath), { recursive: true });
 
-  const response = await drive.files.get(
-    { fileId, alt: 'media' },
-    { responseType: 'stream' }
-  );
+  let response;
+  try {
+    if (mimeType === 'application/vnd.google-apps.document') {
+      response = await drive.files.export(
+        { fileId, mimeType: 'text/plain' },
+        { responseType: 'stream' }
+      );
+    } else {
+      response = await drive.files.get(
+        { fileId, alt: 'media' },
+        { responseType: 'stream' }
+      );
+    }
+  } catch (err: any) {
+    throw new Error(`Failed to initiate Drive download/export: ${err.message}`);
+  }
 
   return new Promise((resolve, reject) => {
     const destStream = fs.createWriteStream(destPath);
     response.data
-      .on('error', (err) => {
+      .on('error', (err: any) => {
         destStream.close();
         fsPromises.unlink(destPath).catch(() => {});
         reject(new Error(`Drive download stream error: ${err.message}`));
@@ -147,13 +159,13 @@ export async function downloadDriveVideo(fileId: string, destPath: string): Prom
 }
 
 /**
- * Clean up a temporary local downloaded video file.
+ * Clean up a temporary local downloaded transcript file.
  */
 export async function cleanupLocalVideo(filePath: string): Promise<void> {
   try {
     await fsPromises.unlink(filePath);
-    log.info('watcher', `Cleaned up local video file: ${path.basename(filePath)}`);
+    log.info('watcher', `Cleaned up local temporary file: ${path.basename(filePath)}`);
   } catch (err: any) {
-    log.warn('watcher', `Failed to delete local temporary video file: ${err.message}`);
+    log.warn('watcher', `Failed to delete local temporary file: ${err.message}`);
   }
 }

@@ -11,7 +11,7 @@ import { config } from './config.js';
 import { log } from './logger.js';
 import { findNewVideos } from './watcher.js';
 import { processVideo } from './pipeline.js';
-import { findNewDriveVideos, downloadDriveVideo, cleanupLocalVideo, hasGoogleCredentials } from './driveWatcher.js';
+import { findNewDriveTranscripts, downloadDriveTranscript, cleanupLocalVideo, hasGoogleCredentials } from './driveWatcher.js';
 
 const ONE_SHOT = process.argv.includes('--once');
 
@@ -32,23 +32,26 @@ async function processAllNew(): Promise<number> {
 
   // 2. Process Google Drive files if configured
   if (config.googleDriveFolderUrl) {
-    const driveVideos = await findNewDriveVideos();
-    for (const driveVideo of driveVideos) {
-      const ext = path.extname(driveVideo.fileName);
-      const tempLocalPath = path.join(config.watchFolder, `drive_${driveVideo.fileId}${ext}`);
+    const driveTranscripts = await findNewDriveTranscripts();
+    for (const driveTranscript of driveTranscripts) {
+      let ext = path.extname(driveTranscript.fileName);
+      if (driveTranscript.mimeType === 'application/vnd.google-apps.document') {
+        ext = '.txt';
+      }
+      const tempLocalPath = path.join(config.watchFolder, `drive_${driveTranscript.fileId}${ext}`);
       
       try {
-        await downloadDriveVideo(driveVideo.fileId, tempLocalPath);
+        await downloadDriveTranscript(driveTranscript.fileId, tempLocalPath, driveTranscript.mimeType);
         
         await processVideo({
-          fileId: driveVideo.fileId,
-          fileName: driveVideo.fileName,
+          fileId: driveTranscript.fileId,
+          fileName: driveTranscript.fileName,
           filePath: tempLocalPath,
         });
         
         processed++;
       } catch (err) {
-        log.error('main', `Failed to process Drive file ${driveVideo.fileName}, skipping.`);
+        log.error('main', `Failed to process Drive file ${driveTranscript.fileName}, skipping.`);
         log.error('main', err instanceof Error ? err.message : String(err));
       } finally {
         await cleanupLocalVideo(tempLocalPath);
