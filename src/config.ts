@@ -15,6 +15,21 @@ function env(key: string, fallback: string): string {
   return process.env[key] || fallback;
 }
 
+// Detect if API keys are provided to override local/default configurations
+const hasAssemblyKey = !!(process.env.ASSEMBLYAI_API_KEY && process.env.ASSEMBLYAI_API_KEY.trim());
+const hasAnthropicKey = !!(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim());
+
+const rawTranscriptionProvider = env('TRANSCRIPTION_PROVIDER', 'local');
+const rawEvaluationProvider = env('EVALUATION_PROVIDER', 'local');
+
+const transcriptionProvider = (hasAssemblyKey && rawTranscriptionProvider !== 'mock')
+  ? 'assemblyai'
+  : (rawTranscriptionProvider as 'local' | 'assemblyai' | 'mock');
+
+const evaluationProvider = (hasAnthropicKey && rawEvaluationProvider !== 'mock')
+  ? 'anthropic'
+  : (rawEvaluationProvider as 'local' | 'anthropic' | 'mock');
+
 export const config = {
   // Paths
   watchFolder: path.resolve(root, env('WATCH_FOLDER', './data/watch')),
@@ -28,12 +43,12 @@ export const config = {
   pollIntervalMs: parseInt(env('POLL_INTERVAL_MS', '30000'), 10),
 
   // Transcription
-  transcriptionProvider: env('TRANSCRIPTION_PROVIDER', 'mock') as 'local' | 'assemblyai' | 'mock',
+  transcriptionProvider,
   assemblyaiApiKey: process.env.ASSEMBLYAI_API_KEY || '',
   whisperModelSize: env('WHISPER_MODEL_SIZE', 'base'), // tiny, base, small
 
   // Evaluation
-  evaluationProvider: env('EVALUATION_PROVIDER', 'mock') as 'local' | 'anthropic' | 'mock',
+  evaluationProvider,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   anthropicModel: env('ANTHROPIC_MODEL', 'claude-sonnet-4-20250514'),
 

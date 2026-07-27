@@ -1,8 +1,8 @@
-# 🚀 Setup Guide: Classsbuk Video AI Reviewer
+# 🚀 Setup Guide: Classsbuk Transcript AI Reviewer (Drive Edition)
 
-Welcome to the **Classsbuk AI Class Recording Reviewer**. This project automatically downloads educational videos from Google Drive, transcribes the audio, analyzes visual frames using a content-aware event detector, and generates a structured academic quality audit report using local or cloud AI models.
+Welcome to the **Classsbuk Transcript AI Reviewer**. This branch of the project is a simplified, high-efficiency pipeline that automatically downloads class transcript files (JSON, TXT, or Google Docs) from Google Drive, parses them, and generates structured academic quality audit reports using local or cloud AI models.
 
-Follow this guide to get the system running locally from scratch.
+Since this version analyzes transcript text directly, **no audio extraction, video processing, or video-to-text transcription is required.**
 
 ---
 
@@ -11,19 +11,19 @@ Follow this guide to get the system running locally from scratch.
 Before you start, ensure you have the following installed on your system:
 
 1. **[Node.js](https://nodejs.org/)** (v18 or higher recommended)
-2. **[Python](https://www.python.org/downloads/)** (v3.9 or higher, required for local Whisper transcription)
-3. **[FFmpeg](https://ffmpeg.org/download.html)** (Required for audio/video frame extraction)
-   - *Ensure `ffmpeg` is added to your system's PATH.*
-4. **[Ollama](https://ollama.com/)** (Required for local LLM inference)
+2. **[Ollama](https://ollama.com/)** (Required only if running evaluations locally without an API key)
+
+*Note: Python, FFmpeg, and Whisper are NOT required for this transcript-only pipeline.*
 
 ---
 
 ## 📦 1. Installation
 
-1. **Clone the repository:**
+1. **Clone the repository and checkout the branch:**
    ```bash
    git clone https://github.com/Inclineed/clbuk.git
    cd clbuk
+   git checkout feature/drive-transcript-analysis
    ```
 
 2. **Install Node.js dependencies:**
@@ -31,28 +31,24 @@ Before you start, ensure you have the following installed on your system:
    npm install
    ```
 
-3. **Install Local AI dependencies (Optional but recommended):**
-   If you plan to use local transcription (`TRANSCRIPTION_PROVIDER=local`), you need to set up the Python environment for `faster-whisper`.
-   Run the provided PowerShell script:
-   ```powershell
-   .\scripts\setup-local-ai.ps1
-   ```
-   *(This will create a `.venv-whisper` virtual environment and install necessary Python packages).*
-
 ---
 
-## 🧠 2. Setting up Ollama (Local AI)
+## 🧠 2. LLM Provider Setup
 
-If you are using local models for evaluation and vision (which is the default configuration), you need to pull the required models into your Ollama instance.
+You can run evaluations using either a local LLM or Anthropic's Claude:
 
+### Option A: Cloud LLM (Claude) - Recommended
+Simply configure your `ANTHROPIC_API_KEY` in the `.env` file. The system will automatically detect the key and use Claude for all evaluations.
+
+### Option B: Local LLM (Ollama)
+If no API key is provided, the system defaults to Ollama:
 1. Start the Ollama server:
    ```bash
    ollama serve
    ```
-2. Open a new terminal and pull the language model (for the evaluator) and the vision model (for frame analysis):
+2. Pull the default language model:
    ```bash
    ollama pull llama3.1
-   ollama pull llava
    ```
 
 ---
@@ -67,16 +63,14 @@ If you are using local models for evaluation and vision (which is the default co
 
 2. **Configure `.env` variables:**
    Open `.env` in your text editor. Key variables to note:
-   - `TRANSCRIPTION_PROVIDER`: Set to `local` (uses Python Whisper) or `assemblyai` (requires API key).
-   - `EVALUATION_PROVIDER`: Set to `local` (uses Ollama) or `anthropic` (requires API key).
-   - `OLLAMA_MODEL`: Set to `llama3.1` (or whichever text model you pulled).
-   - `OLLAMA_VISION_MODEL`: Set to `llava` (or whichever vision model you pulled).
+   - `ANTHROPIC_API_KEY`: Paste your Claude API key here to automatically use cloud evaluation.
+   - `EVALUATION_PROVIDER`: Defaults to `local` (uses Ollama), but automatically overrides to `anthropic` if an API key is detected.
+   - `OLLAMA_MODEL`: Set to `llama3.1` (if using Ollama).
 
-3. **Google Drive Integration (Optional):**
-   If you want the system to watch a Google Drive folder:
+3. **Google Drive Integration:**
    - Obtain a Google Service Account JSON key.
    - Save it as `google-credentials.json` in the project root.
-   - Fill in `GOOGLE_DRIVE_FOLDER_URL` and `GOOGLE_SHEET_URL` in the `.env` file.
+   - Fill in `GOOGLE_DRIVE_FOLDER_URL` (folder containing transcripts) and `GOOGLE_SHEET_URL` (tracking sheet) in the `.env` file.
 
 ---
 
@@ -85,14 +79,13 @@ If you are using local models for evaluation and vision (which is the default co
 You can run the pipeline in two modes:
 
 ### Watch Mode (Continuous Polling)
-The system will run continuously, checking the configured Google Drive folder (or local `data/watch` folder) every 30 seconds for new videos.
+The system will run continuously, checking the configured Google Drive folder (or local `data/watch` folder) every 30 seconds for new transcripts.
 ```bash
 npm start
 ```
-*(Or use `npm run dev` if you want automatic restarts during development).*
 
 ### Single Run Mode
-If you want to process existing videos in the watch folder and then exit immediately without continuous polling:
+If you want to process existing transcripts in the watch folder and then exit immediately:
 ```bash
 npm run process
 ```
@@ -101,12 +94,12 @@ npm run process
 
 ## 📂 5. Output Architecture
 
-When a video is processed, the system creates the following artifacts in the `data/` directory:
+When a transcript is processed, the system creates the following artifacts:
 
-- **`data/watch/`**: Drop video files here if not using Google Drive.
-- **`data/working/<video_id>/`**: Temporary processing files (audio extraction, thumbnails).
-- **`data/reports/`**: The final Markdown (`.md`) audit reports containing the factual accuracy audit, visual timeline, and overall academic rubric scores.
+- **`data/watch/`**: Drop transcript files here (in `.txt` or `.json` format) if not using Google Drive.
+- **`data/transcripts/`**: Saves structured, timestamped `.json` representations of all parsed transcripts.
+- **`data/reports/`**: The final Markdown (`.md`) quality audit reports containing factual accuracy audits, rubric scores, and recommendations.
 
 ---
 
-> **Tip:** The system features a smart, content-aware visual event detector. It dynamically changes its frame sampling rate based on what is on the screen (e.g. `WHITEBOARD` uses a 15-second debounce, while `SLIDES` uses a 5-second debounce with high change thresholds) to save LLM compute time!
+> **Tip:** The transcript parser is highly robust! It automatically parses files formatted as `[MM:SS] Speaker: text`, `Speaker: text`, or raw plain text (estimating timestamps and speakers). If a Google Doc is scanned in Google Drive, the system automatically exports and downloads it as a plain-text transcript file!
